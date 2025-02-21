@@ -6,11 +6,14 @@ PR2で血管モデルを縫合する．
 20250221 曲率を持った軌跡の作成
 |#
 
-;; PR2のインタフェースをロードする
+;; PR2のインタフェースをインポート
 (require "package://pr2eus/pr2.l")
 (require "package://pr2eus/pr2-utils.l")
 (require "package://pr2eus/pr2-interface.l") ;;*ri*
 (require "package://pr2eus/speak.l") ;;pkg for speaking
+
+;; 曲率を持った軌跡のクラスのインポート
+(load "trajectory.l")
 
 ;; jskのメッセージ型をロードする
 (ros::load-ros-package "jsk_recognition_msgs")
@@ -21,7 +24,6 @@ PR2で血管モデルを縫合する．
 (if (not (boundp '*pr2*)) (pr2-init)) ;; 変数*pr2*が存在しなければ(pr2-init)を実行する
 
 ;; 指の長さのオフセットを決める
-;; 指を
 (setq *finger-offset* 45)
 
 ;; 実験環境の中心の設定
@@ -135,61 +137,15 @@ PR2で血管モデルを縫合する．
 (send *right-tube* :set-color :white)
 (setq *right-tube-lc* (send (send *right-tube* :copy-worldcoords) :translate (float-vector 0 0 0)))
 
-;; 描画の初期化
+;; 実験環境の描画
 (make-irtviewer)
 (objects (list *pr2* *center* *desk* *table* *needle* *left-tube* *right-tube*))
 (send *irtviewer* :draw-objects)
 
-;; 軌道の生成
-;; 直線状の軌跡の定義
-(defclass traj
-  :super cascaded-coords
-  :slots (points))
-
-(defmethod traj
-  (:init (&rest args)
-	 (send-super* :init args)
-	 (dotimes (i *traj_num*)
-	   (push
-	    (make-cube 10 10 10 :pos (float-vector (* (- i 5) *interval*) 0 0))
-	    points))
-	 (dotimes (i (- (length points) 1))
-	   (send (elt points i) :assoc (elt points (+ 1 i))))
-	 (send self :assoc (car points))
-	 self)
-  (:points () points)
-  )
-
-
-;; 曲がった軌跡の定義
-(defclass curved-traj
-  :super cascaded-coords
-  :slots (points))
-
-(defmethod curved-traj
-  (:init (&key (radius 30.0) (start-angle -45) (end-angle 45)) ;; 初期値は適当
-         (send-super :init)
-         (let* ((angle-step (/ (- end-angle start-angle) (1- *traj_num*)))
-                (current-angle start-angle))
-           ;; generate points
-           (setq points nil)  ;; initialize points
-           (dotimes (i *traj_num*)
-             (let* ((theta (deg2rad current-angle))
-                    (x (* radius (sin theta)))
-                    (z (* radius (cos theta)))
-                    (point (make-cube 10 10 10 
-                                    :pos (float-vector x 0 z))))
-               (push point points)
-               (setq current-angle (+ current-angle angle-step))))
-           (setq points (reverse points)))
-         ;; assoc
-         (dotimes (i (1- (length points)))
-           (send (elt points i) :assoc (elt points (1+ i))))
-         (send self :assoc (car points))
-         self)
-  (:points () points))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
 ;; ここからメイン
 ;; 初期姿勢に戻る
 (setq *voice-mode* nil)
@@ -238,68 +194,14 @@ PR2で血管モデルを縫合する．
 (send *ri* :wait-interpolation)
 (send *irtviewer* :draw-objects)
 
-;; TODO: Now Constructing
-;; 曲線的(円弧)の軌道
+
+;; 曲率を持った経路の生成
 (setq *interval* 1.5)
 (setq *traj_num* 5)
 (setq *traj_len* (* *interval* *traj_num*))
-
-;; 直線状の軌跡の定義
-(defclass traj
-  :super cascaded-coords
-  :slots (points))
-
-(defmethod traj
-  (:init (&rest args)
-	 (send-super* :init args)
-	 (dotimes (i *traj_num*)
-	   (push
-	    (make-cube 10 10 10 :pos (float-vector (* (- i 5) *interval*) 0 0))
-	    points))
-	 (dotimes (i (- (length points) 1))
-	   (send (elt points i) :assoc (elt points (+ 1 i))))
-	 (send self :assoc (car points))
-	 self)
-  (:points () points)
-  )
-
-
-;; 曲がった軌跡の定義
-;; 曲線的(円弧)の軌道
-(setq *interval* 1.5)
-(setq *traj_num* 5)
-(setq *traj_len* (* *interval* *traj_num*))
-
-(defclass curved-traj
-  :super cascaded-coords
-  :slots (points))
-(defmethod curved-traj
-  (:init (&key (radius 30.0) (start-angle -45) (end-angle 45)) ;; 初期値は適当
-         (send-super :init)
-         (let* ((angle-step (/ (- end-angle start-angle) (1- *traj_num*)))
-                (current-angle start-angle))
-           ;; generate points
-           (setq points nil)  ;; initialize points
-           (dotimes (i *traj_num*)
-             (let* ((theta (deg2rad current-angle))
-                    (x (* radius (sin theta)))
-                    (z (* radius (cos theta)))
-                    (point (make-cube 10 10 10 
-                                    :pos (float-vector x 0 z))))
-               (push point points)
-               (setq current-angle (+ current-angle angle-step))))
-           (setq points (reverse points)))
-         ;; assoc
-         (dotimes (i (1- (length points)))
-           (send (elt points i) :assoc (elt points (1+ i))))
-         (send self :assoc (car points))
-         self)
-  (:points () points))
-
-
-;; 曲率を持った軌跡の生成
 (setq *curved-path* (instance curved-traj :init))
 (send *curved-path* :translate (send *left-tube-rc* :worldpos))
+;; TODO: translateする先の位置(*left-tube-rc*)をDepth cameraで取得したい
 (send *curved-path* :translate #f(0 0 20))
 (send *curved-path* :rotate #d90 :z)
 (send *curved-path* :rotate #d180 :x)
@@ -311,7 +213,7 @@ PR2で血管モデルを縫合する．
 (send *irtviewer* :draw-objects)
 
 ;; 縫う
-
+;; TODO: 経路に位置だけではなくて姿勢も持たせる。
 (setq tm 4000)
 (setq path (list))
 (setq time-vec (list 4000))
@@ -326,6 +228,7 @@ PR2で血管モデルを縫合する．
     (push (print (send *pr2* :larm :inverse-kinematics ee :use-torso t :rotation-axis t)) path)
     (push tm time-vec)
   )
+
 (pop time-vec)
 (nreverse time-vec)
 (send *ri* :angle-vector-sequence path time-vec
@@ -334,6 +237,11 @@ PR2で血管モデルを縫合する．
      :minjerk-interpolation t)
 (send *ri* :wait-interpolation)
 (send *irtviewer* :draw-objects)
+
+;; TODO: 引き出し (vision, 触覚)
+
+;; TODO: 持ち替え
+
 ;; for debug view
 ;; (send (send *left-tube* :copy-worldcoords) :draw-on :flush t :size 100)
 ;; (send *left-tube-rc* :draw-on :flush t :size 100)
