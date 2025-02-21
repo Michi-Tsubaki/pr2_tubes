@@ -22,12 +22,12 @@ PR2で血管モデルを縫合する．
 
 ;; 指の長さのオフセットを決める
 ;; 指を
-(setq *finger-offset* 80)
+(setq *finger-offset* 45)
 
 ;; 実験環境の中心の設定
 (setq *centerx* 700)
 (setq *centery* 0)
-(setq *centerz* 755)
+(setq *centerz* 780)
 (setq *center* (make-cube 10 10 10))
 (send *center* :translate (float-vector *centerx* *centery* *centerz*))
 (send *center* :set-color :black)
@@ -140,14 +140,64 @@ PR2で血管モデルを縫合する．
 (objects (list *pr2* *center* *desk* *table* *needle* *left-tube* *right-tube*))
 (send *irtviewer* :draw-objects)
 
+;; 軌道の生成
+;; 直線状の軌跡の定義
+(defclass traj
+  :super cascaded-coords
+  :slots (points))
+
+(defmethod traj
+  (:init (&rest args)
+	 (send-super* :init args)
+	 (dotimes (i *traj_num*)
+	   (push
+	    (make-cube 10 10 10 :pos (float-vector (* (- i 5) *interval*) 0 0))
+	    points))
+	 (dotimes (i (- (length points) 1))
+	   (send (elt points i) :assoc (elt points (+ 1 i))))
+	 (send self :assoc (car points))
+	 self)
+  (:points () points)
+  )
+
+
+;; 曲がった軌跡の定義
+(defclass curved-traj
+  :super cascaded-coords
+  :slots (points))
+
+(defmethod curved-traj
+  (:init (&key (radius 30.0) (start-angle -45) (end-angle 45)) ;; 初期値は適当
+         (send-super :init)
+         (let* ((angle-step (/ (- end-angle start-angle) (1- *traj_num*)))
+                (current-angle start-angle))
+           ;; generate points
+           (setq points nil)  ;; initialize points
+           (dotimes (i *traj_num*)
+             (let* ((theta (deg2rad current-angle))
+                    (x (* radius (sin theta)))
+                    (z (* radius (cos theta)))
+                    (point (make-cube 10 10 10 
+                                    :pos (float-vector x 0 z))))
+               (push point points)
+               (setq current-angle (+ current-angle angle-step))))
+           (setq points (reverse points)))
+         ;; assoc
+         (dotimes (i (1- (length points)))
+           (send (elt points i) :assoc (elt points (1+ i))))
+         (send self :assoc (car points))
+         self)
+  (:points () points))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; ここからメイン
 ;; 初期姿勢に戻る
 (setq *voice-mode* nil)
 (if *voice-mode* (send *ri* :speak-jp "初期姿勢に戻ります" :wait t))
 (send *ri* :stop-grasp) ;; 両指を開く
-;;(send *ri* :angle-vector (send *pr2* :reset-pose) 2000)  
-(send *ri* :wait-interpolation)
-(send *pr2* :torso :waist-z :joint-angle 270) ;; 予め腰を上げておくことで腕が机に干渉するのを回避)
+(send *pr2* :reset-pose)
+(send *pr2* :torso :waist-z :joint-angle 300) ;; 予め腰を上げておくことで腕が机に干渉するのを回避)
 (send *ri* :angle-vector (send *pr2* :angle-vector) 2000)
 (send *ri* :wait-interpolation)
 (send *irtviewer* :draw-objects)
@@ -172,49 +222,60 @@ PR2で血管モデルを縫合する．
 (send *irtviewer* :draw-objects)
 
 ;; 縫い始める
-;; 針の端に座標系を作成
-(setq *needle-tip-coords* (make-cascoords :pos (send (elt needle-bodies (1- (length needle-bodies))) :worldpos)))
-(send *needle-tip-coords* :rotate #d225 :x)
-(send *needle* :assoc *needle-tip-coords*)
-
+;; 針の端に座標系を作成 ;; 針の端をlarmの先っぽとしてikを解くのはこれではできなそうな
+;; なので，とりあえず:larmでikを解くことにして，needle-tip-coordsはとりあえず使わないことにする
+;; (setq *needle-tip-coords* (make-cascoords :pos (send (elt needle-bodies (1- (length needle-bodies))) :worldpos)))
+;; (send *needle-tip-coords* :rotate #d225 :x)
+;; (send *needle* :assoc *needle-tip-coords*)
 
 ;; 目標の軌道を作成
 (setq *target-coords* (send *left-tube-rc* :copy-worldcoords))
 (send *target-coords* :rotate #d90 :x)  ;; 血管の向きに合わせる
-(send *target-coords* :rotate #d180 :z)  ;; 針の先端を血管に向ける
-(send *target-coords* :rotate #d180 :x)  ;; 上下を反転
-;; IKを解く（torsoを使用）
-;; メモ: https://euslisp-docs.readthedocs.io/en/latest/jskeus/jmanual/
-(send *pr2* :larm :inverse-kinematics *target-coords* 
-      :move-target *needle-tip-coords*
-      :link-list (send *pr2* :link-list (send *pr2* :larm :end-coords :parent))
-      :rotation-axis t
-      :use-torsi t
-      :debug-view t)
+(send *target-coords* :rotate #d90 :z)  ;; 針の先端を血管に向ける
+(send *target-coords* :rotate #d270 :y)
+(send *pr2* :larm :inverse-kinematics *target-coords* :rotation-axis t)
 (send *ri* :angle-vector (send *pr2* :angle-vector) 2000)
 (send *ri* :wait-interpolation)
 (send *irtviewer* :draw-objects)
 
-;; 計画中
-;; 曲率を持ったtrajectory
-;; 軌道のパラメータ設定
-(setq *needle_len* 70)
-(setq *interval* 10)
-(setq *traj_num* 10)
+;; TODO: Now Constructing
+;; 曲線的(円弧)の軌道
+(setq *interval* 2)
+(setq *traj_num* 5)
 (setq *traj_len* (* *interval* *traj_num*))
 
-;; 曲線的な軌道のためのtrajクラスを定義
+;; 直線状の軌跡の定義
+(defclass traj
+  :super cascaded-coords
+  :slots (points))
+
+(defmethod traj
+  (:init (&rest args)
+	 (send-super* :init args)
+	 (dotimes (i *traj_num*)
+	   (push
+	    (make-cube 10 10 10 :pos (float-vector (* (- i 5) *interval*) 0 0))
+	    points))
+	 (dotimes (i (- (length points) 1))
+	   (send (elt points i) :assoc (elt points (+ 1 i))))
+	 (send self :assoc (car points))
+	 self)
+  (:points () points)
+  )
+
+
+;; 曲がった軌跡の定義
 (defclass curved-traj
   :super cascaded-coords
   :slots (points))
 
 (defmethod curved-traj
-  (:init (&key (radius 30.0) (start-angle -45) (end-angle 45))
-         (send-super :init)  ;; 修正：argumentsなしで初期化
+  (:init (&key (radius 30.0) (start-angle -45) (end-angle 45)) ;; 初期値は適当
+         (send-super :init)
          (let* ((angle-step (/ (- end-angle start-angle) (1- *traj_num*)))
                 (current-angle start-angle))
-           ;; 円弧上の点を生成
-           (setq points nil)  ;; pointsを初期化
+           ;; generate points
+           (setq points nil)  ;; initialize points
            (dotimes (i *traj_num*)
              (let* ((theta (deg2rad current-angle))
                     (x (* radius (sin theta)))
@@ -224,36 +285,51 @@ PR2で血管モデルを縫合する．
                (push point points)
                (setq current-angle (+ current-angle angle-step))))
            (setq points (reverse points)))
-         ;; 点同士を関連付け
+         ;; assoc
          (dotimes (i (1- (length points)))
            (send (elt points i) :assoc (elt points (1+ i))))
          (send self :assoc (car points))
          self)
   (:points () points))
 
-;; 血管縫合のための関数
-(defun stitch-blood-vessels ()
-  ;; 針の端に座標系を作成
-  (setq *needle-tip-coords* (make-cascoords :pos (send (elt needle-bodies (1- (length needle-bodies))) :worldpos)))
-  (send *needle* :assoc *needle-tip-coords*)
 
-  ;; 最初の血管（左）への軌道
-  (setq *target-coords* (send *left-tube-rc* :copy-worldcoords))
-  
-  ;; 曲線軌道を生成
-  (setq *curved-path* (instance curved-traj :init))
-  (send *curved-path* :translate (send *target-coords* :worldpos))
-  
-  ;; すべてのオブジェクトを表示（軌道の点を含む）
-  (objects (append (list *pr2* *center* *desk* *table* *needle* *left-tube* *right-tube*)
-                  (send *curved-path* :points)))
-)
-
-;; 実行
-(stitch-blood-vessels)
+;; 曲率を持った軌跡の生成
+(setq *curved-path* (instance curved-traj :init))
+(send *curved-path* :translate (send *left-tube-rc* :worldpos))
+(send *curved-path* :translate #f(0 0 20))
+(send *curved-path* :rotate #d90 :z)
+(send *curved-path* :rotate #d180 :x)
+(send *irtviewer* :draw-objects)
 
 
-;; for debug
+;; 表示させるためにobjectsのリストに*curved-path*を追加する
+(objects (append (list *pr2* *center* *desk* *table* *needle* *left-tube* *right-tube*) (send *curved-path* :points)))
+(send *irtviewer* :draw-objects)
+
+;; 縫う
+(setq tm 500)
+(setq path (list))
+(setq time-vec (list 4000))
+
+(dolist (e (send *curved-path* :points))
+    (setq ee (send e :copy-worldcoords))
+    (send ee :translate (float-vector 0 0 0) :local) ;; (- *needle_len* *rarm_offset*)
+    ;;(send ee :rotate pi :z :local)
+    (send ee :rotate #d270 :y :local)
+    (send ee :translate (float-vector -10 0 0))
+    (send ee :draw-on :flush t :size 100)
+    (push (print (send *pr2* :larm :inverse-kinematics ee :use-torso t :rotation-axis t)) path)
+    (push tm time-vec)
+  )
+(pop time-vec)
+(nreverse time-vec)
+(send *ri* :angle-vector-sequence path time-vec
+     :default-controller 0.001
+     :min-time 0.0001
+     :minjerk-interpolation t)
+(send *ri* :wait-interpolation)
+(send *irtviewer* :draw-objects)
+;; for debug view
 ;; (send (send *left-tube* :copy-worldcoords) :draw-on :flush t :size 100)
 ;; (send *left-tube-rc* :draw-on :flush t :size 100)
 ;; (send (send *right-tube* :copy-worldcoords) :draw-on :flush t :size 100)
