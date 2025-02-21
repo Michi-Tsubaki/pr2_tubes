@@ -2,8 +2,8 @@
 
 #| DESCRIPTION
 PR2で血管モデルを縫合する．
-
 20250219 血管の縫い方
+20250221 曲率を持った軌跡の作成
 |#
 
 ;; PR2のインタフェースをロードする
@@ -189,7 +189,6 @@ PR2で血管モデルを縫合する．
          self)
   (:points () points))
 
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; ここからメイン
 ;; 初期姿勢に戻る
@@ -198,7 +197,7 @@ PR2で血管モデルを縫合する．
 (send *ri* :stop-grasp) ;; 両指を開く
 (send *pr2* :reset-pose)
 (send *pr2* :torso :waist-z :joint-angle 300) ;; 予め腰を上げておくことで腕が机に干渉するのを回避)
-(send *ri* :angle-vector (send *pr2* :angle-vector) 2000)
+(send *ri* :angle-vector (send *pr2* :angle-vector) 10000)
 (send *ri* :wait-interpolation)
 (send *irtviewer* :draw-objects)
 
@@ -213,7 +212,7 @@ PR2で血管モデルを縫合する．
 (send *irtviewer* :draw-objects)
 
 (if *voice-mode* (send *ri* :speak-jp "針を持たせてください" :wait t))
-(send *ri* :stop-grasp :larm)
+;; (send *ri* :stop-grasp :larm)
 (send *ri* :wait-interpolation)
 (ros::duration-sleep 2) ;; 2秒間待機する 
 (send *ri* :start-grasp :larm)
@@ -233,14 +232,15 @@ PR2で血管モデルを縫合する．
 (send *target-coords* :rotate #d90 :x)  ;; 血管の向きに合わせる
 (send *target-coords* :rotate #d90 :z)  ;; 針の先端を血管に向ける
 (send *target-coords* :rotate #d270 :y)
+(send *target-coords* :rotate #d180 :x)
 (send *pr2* :larm :inverse-kinematics *target-coords* :rotation-axis t)
-(send *ri* :angle-vector (send *pr2* :angle-vector) 2000)
+(send *ri* :angle-vector (send *pr2* :angle-vector) 5000)
 (send *ri* :wait-interpolation)
 (send *irtviewer* :draw-objects)
 
 ;; TODO: Now Constructing
 ;; 曲線的(円弧)の軌道
-(setq *interval* 2)
+(setq *interval* 1.5)
 (setq *traj_num* 5)
 (setq *traj_len* (* *interval* *traj_num*))
 
@@ -265,10 +265,14 @@ PR2で血管モデルを縫合する．
 
 
 ;; 曲がった軌跡の定義
+;; 曲線的(円弧)の軌道
+(setq *interval* 1.5)
+(setq *traj_num* 5)
+(setq *traj_len* (* *interval* *traj_num*))
+
 (defclass curved-traj
   :super cascaded-coords
   :slots (points))
-
 (defmethod curved-traj
   (:init (&key (radius 30.0) (start-angle -45) (end-angle 45)) ;; 初期値は適当
          (send-super :init)
@@ -307,7 +311,8 @@ PR2で血管モデルを縫合する．
 (send *irtviewer* :draw-objects)
 
 ;; 縫う
-(setq tm 500)
+
+(setq tm 4000)
 (setq path (list))
 (setq time-vec (list 4000))
 
@@ -316,7 +321,7 @@ PR2で血管モデルを縫合する．
     (send ee :translate (float-vector 0 0 0) :local) ;; (- *needle_len* *rarm_offset*)
     ;;(send ee :rotate pi :z :local)
     (send ee :rotate #d270 :y :local)
-    (send ee :translate (float-vector -10 0 0))
+    (send ee :translate (float-vector 0 0 0))
     (send ee :draw-on :flush t :size 100)
     (push (print (send *pr2* :larm :inverse-kinematics ee :use-torso t :rotation-axis t)) path)
     (push tm time-vec)
