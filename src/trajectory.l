@@ -35,7 +35,7 @@
   :super cascaded-coords
   :slots (points))
 (defmethod curved-traj
-  (:init (&key (radius 30.0) (start-angle -45) (end-angle 45)) ;; 初期値は適当
+  (:init (&key (radius 30.0) (start-angle -15) (end-angle 15)) ;; 初期値は適当
          (send-super :init)
          (let* ((angle-step (/ (- end-angle start-angle) (1- *traj_num*)))
                 (current-angle start-angle))
@@ -45,8 +45,9 @@
              (let* ((theta (deg2rad current-angle))
                     (x (* radius (sin theta)))
                     (z (* radius (cos theta)))
-                    (point (make-cube 10 10 10 
-                                    :pos (float-vector x 0 z))))
+                    (point (make-cube 10 10 10 :pos (float-vector x 0 z)))
+		    )
+	       (send point :orient (- 0 (deg2rad current-angle)) :y)
                (push point points)
                (setq current-angle (+ current-angle angle-step))))
            (setq points (reverse points)))
@@ -55,4 +56,5 @@
            (send (elt points i) :assoc (elt points (1+ i))))
          (send self :assoc (car points))
          self)
-  (:points () points))
+  (:points () points)
+  )
