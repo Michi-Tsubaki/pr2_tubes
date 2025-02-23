@@ -138,8 +138,34 @@ PR2で血管モデルを縫合する．
 (setq *right-tube-lc* (send (send *right-tube* :copy-worldcoords) :translate (float-vector 0 0 0)))
 
 ;; 実験環境の描画
-(make-irtviewer)
-(objects (list *pr2* *center* *desk* *table* *needle* *left-tube* *right-tube*))
+(setq *finger-thickness* 8)  ;; 厚さ 5mm
+(setq *finger-width* 10)     ;; 幅 20mm
+(setq *finger-length* *finger-offset*)  ;; 長さは既存の*finger-offset*を使用
+
+;; 左手の指の拡張部分を作成
+(setq *left-finger-extension* (make-cube *finger-length* *finger-width* *finger-thickness*))
+(send *left-finger-extension* :set-color :green)  ;; 緑色に設定
+
+;; 右手の指の拡張部分を作成
+(setq *right-finger-extension* (make-cube *finger-length* *finger-width* *finger-thickness*))
+(send *right-finger-extension* :set-color :green)
+
+;; 左手の指先に拡張部分を配置
+(setq *left-finger-coords* (send (send *pr2* :larm :end-coords) :copy-worldcoords))
+(send *left-finger-coords* :translate (float-vector (/ *finger-length* 2) 0 0))  ;; 指先方向に移動
+(send *left-finger-coords* :rotate (deg2rad -90) :x)  ;; z軸周りに-90度回転
+(send *left-finger-extension* :move-to *left-finger-coords* :world)
+(send (send *pr2* :larm :end-coords) :assoc *left-finger-extension*)
+
+;; 右手の指先に拡張部分を配置
+(setq *right-finger-coords* (send (send *pr2* :rarm :end-coords) :copy-worldcoords))
+(send *right-finger-coords* :translate (float-vector (/ *finger-length* 2) 0 0))  ;; 指先方向に移動
+(send *right-finger-coords* :rotate (deg2rad -90) :x)  ;; z軸周りに-90度回転
+(send *right-finger-extension* :move-to *right-finger-coords* :world)
+(send (send *pr2* :rarm :end-coords) :assoc *right-finger-extension*)
+
+;; ビューワーのオブジェクトリストを更新
+(objects (list *pr2* *center* *desk* *table* *needle* *left-tube* *right-tube* *left-finger-extension* *right-finger-extension*))
 (send *irtviewer* :draw-objects)
 
 
@@ -162,7 +188,7 @@ PR2で血管モデルを縫合する．
 (setq *larm-coords* (send *pr2* :larm :end-coords :copy-worldcoords))
 (send *larm-coords* :rotate #d180 :y)
 (send *larm-coords* :rotate #d180 :z)
-(send *larm-coords* :translate (float-vector (+ 10 *finger-offset*) 0 -10))
+(send *larm-coords* :translate (float-vector (- *finger-offset* 12) 0 -8))
 (send *needle* :move-to *larm-coords* :world)
 (send (send *pr2* :larm :end-coords) :assoc *needle*)
 (send *irtviewer* :draw-objects)
@@ -207,36 +233,84 @@ PR2で血管モデルを縫合する．
 (send *curved-path* :rotate #d180 :x)
 (send *irtviewer* :draw-objects)
 
-
 ;; 表示させるためにobjectsのリストに*curved-path*を追加する
-(objects (append (list *pr2* *center* *desk* *table* *needle* *left-tube* *right-tube*) (send *curved-path* :points)))
+(objects (append (list *pr2* *center* *desk* *table* *needle* *left-tube* *right-tube* *left-finger-extension* *right-finger-extension*) (send *curved-path* :points)))
 (send *irtviewer* :draw-objects)
 
+;; 左手の拡張部分の先端に座標系を作成
+(setq *left-finger-tip* (make-cascoords))
+(send *left-finger-tip* :transform (send *left-finger-extension* :copy-worldcoords))
+(send *left-finger-tip* :translate (float-vector (/ *finger-length* 2) 0 0))  ;; 拡張部分の先端に移動
+(send *left-finger-tip* :rotate #d90 :x)
+;; 座標系の階層関係を正しく設定
+(send (send *pr2* :larm :end-coords) :assoc *left-finger-tip*)  ;; PR2のend-coordsに関連付け
+
+;; sutureの関数を修正
+(defun suture (trajectory time-interval)
+  (let (
+        (tm time-interval)
+        (path (list))
+        (time-vec (list 4000))
+        )
+    (dolist (e (send trajectory :points))
+      (setq ee (send e :copy-worldcoords))
+      (send ee :translate (float-vector 0 0 0) :local)
+      (send ee :rotate #d270 :y :local)
+      (send ee :rotate #d180 :x :local)  ;; x軸周りに90度回転を追加
+      (send ee :translate (float-vector 0 0 0))
+      (send ee :draw-on :flush t :size 100)
+      ;; IKを解く
+      (push (print (send *pr2* :larm :inverse-kinematics ee 
+                        :move-target *left-finger-tip*
+                        :link-list (send *pr2* :link-list (send *pr2* :larm :end-coords :parent))
+                        :use-torso t 
+                        :rotation-axis t)) 
+            path)
+      (push tm time-vec)
+      )
+    (pop time-vec)
+    (nreverse time-vec)
+    (send *ri* :angle-vector-sequence path time-vec
+          :default-controller 0.001
+          :min-time 0.0001
+          :minjerk-interpolation t)
+    (send *ri* :wait-interpolation)
+    (send *irtviewer* :draw-objects)
+    ))
+
+#| 
 ;; 縫う
 ;; TODO: 経路に位置だけではなくて姿勢も持たせる。
-(setq tm 4000)
-(setq path (list))
-(setq time-vec (list 4000))
-
-(dolist (e (send *curved-path* :points))
-    (setq ee (send e :copy-worldcoords))
-    (send ee :translate (float-vector 0 0 0) :local) ;; (- *needle_len* *rarm_offset*)
-    ;;(send ee :rotate pi :z :local)
-    (send ee :rotate #d270 :y :local)
-    (send ee :translate (float-vector 0 0 0))
-    (send ee :draw-on :flush t :size 100)
-    (push (print (send *pr2* :larm :inverse-kinematics ee :use-torso t :rotation-axis t)) path)
-    (push tm time-vec)
+(defun suture (trajectory time-interval)
+  (let (
+	(tm time-interval)
+	(path (list))
+	(time-vec (list 4000))
+	)
+    (dolist (e (send trajectory :points))
+      (setq ee (send e :copy-worldcoords))
+      (send ee :translate (float-vector 0 0 0) :local) ;; (- *needle_len* *rarm_offset*)
+      ;;(send ee :rotate pi :z :local)
+      (send ee :rotate #d270 :y :local)
+      (send ee :translate (float-vector 0 0 0))
+      (send ee :draw-on :flush t :size 100)
+      (push (print (send *pr2* :larm :inverse-kinematics ee :use-torso t :rotation-axis t)) path)
+      (push tm time-vec)
+      )
+    (pop time-vec)
+    (nreverse time-vec)
+    ;; ikを解く(解けないとエラーが結構やっかい。。。
+    (send *ri* :angle-vector-sequence path time-vec
+	  :default-controller 0.001
+	  :min-time 0.0001
+	  :minjerk-interpolation t)
+    (send *ri* :wait-interpolation)
+    (send *irtviewer* :draw-objects)
+    )
   )
+  |#
 
-(pop time-vec)
-(nreverse time-vec)
-(send *ri* :angle-vector-sequence path time-vec
-     :default-controller 0.001
-     :min-time 0.0001
-     :minjerk-interpolation t)
-(send *ri* :wait-interpolation)
-(send *irtviewer* :draw-objects)
+(suture *curved-path* 4000)
 
 ;; TODO: 引き出し (vision, 触覚)
 
