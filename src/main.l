@@ -222,15 +222,17 @@ PR2で血管モデルを縫合する．
 
 
 ;; 曲率を持った経路の生成
-(setq *interval* 1.5)
-(setq *traj_num* 5)
+(setq *interval* 0.7)
+(setq *traj_num* 10)
 (setq *traj_len* (* *interval* *traj_num*))
 (setq *curved-path* (instance curved-traj :init))
 (send *curved-path* :translate (send *left-tube-rc* :worldpos))
 ;; TODO: translateする先の位置(*left-tube-rc*)をDepth cameraで取得したい
-(send *curved-path* :translate #f(0 0 20))
+(send *curved-path* :translate #f(0 0 33))
 (send *curved-path* :rotate #d90 :z)
 (send *curved-path* :rotate #d180 :x)
+;;(dolist (p (send *curved-path* :points))
+;;  (send p :set-color :red))  ;; 色は:red, :blue, :green等から選択可能
 (send *irtviewer* :draw-objects)
 
 ;; 表示させるためにobjectsのリストに*curved-path*を追加する
@@ -245,8 +247,64 @@ PR2で血管モデルを縫合する．
 ;; 座標系の階層関係を正しく設定
 (send (send *pr2* :larm :end-coords) :assoc *left-finger-tip*)  ;; PR2のend-coordsに関連付け
 
-;; sutureの関数を修正
+
+;; 針の先端座標系を作成
+(setq *needle-tip* (make-cascoords 
+                    :pos (send (car (last needle-bodies)) :worldpos)))
+(send *needle-tip* :rotate #d90 :y)
+(send *needle-tip* :rotate #d180 :x)
+
+
+;; 縫合実行関数
 (defun suture (trajectory time-interval)
+  (let (
+        (tm time-interval)
+        (path (list))
+        (time-vec (list 4000))
+        )
+    ;; 針先の座標系をleft-finger-tipにassoc
+    (send *left-finger-tip* :assoc *needle-tip*)
+    
+    ;; 軌道に沿ってIKを解く
+    (dolist (e (send trajectory :points))
+      (setq ee (send e :copy-worldcoords))
+      (send ee :translate (float-vector 0 0 0) :local)
+      (send ee :rotate #d270 :y :local)
+      (send ee :rotate #d90 :x :local)
+      (send ee :translate (float-vector 0 0 0))
+      (send ee :draw-on :flush t :size 100)
+      
+      ;; IKを解く（針先をターゲットとして指定）
+      (push (print (send *pr2* :larm :inverse-kinematics ee 
+                        :move-target *needle-tip*  ;; 針先を移動対象に
+                        :link-list (send *pr2* :link-list 
+                                       (send *pr2* :larm :end-coords :parent))
+                        :use-torso t 
+                        :rotation-axis t)) 
+            path)
+      (push tm time-vec)
+      )
+    
+    ;; 経路を実行
+    (pop time-vec)
+    (nreverse time-vec)
+;;    (nreverse path)
+    (send *ri* :angle-vector-sequence path time-vec
+          :default-controller 0.001
+          :min-time 0.0001
+          :minjerk-interpolation t)
+    (send *ri* :wait-interpolation)
+    
+    ;; 針先のassocを解除
+    (send *left-finger-tip* :dissoc *needle-tip*)
+    (send *pr2* :angle-vector (send *ri* :potentio-vector))
+    (send *irtviewer* :draw-objects)
+    ))
+
+;; 針先座標系の可視化（デバッグ用）
+(send *needle-tip* :draw-on :flush t :size 50)
+
+#|(defun suture (trajectory time-interval)
   (let (
         (tm time-interval)
         (path (list))
@@ -277,6 +335,7 @@ PR2で血管モデルを縫合する．
     (send *ri* :wait-interpolation)
     (send *irtviewer* :draw-objects)
     ))
+|#
 
 #| 
 ;; 縫う
@@ -311,6 +370,8 @@ PR2で血管モデルを縫合する．
   |#
 
 (suture *curved-path* 4000)
+
+
 
 ;; TODO: 引き出し (vision, 触覚)
 
