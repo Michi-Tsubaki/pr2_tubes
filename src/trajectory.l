@@ -43,12 +43,15 @@
            (setq points nil)  ;; initialize points
            (dotimes (i *traj_num*)
              (let* ((theta (deg2rad current-angle))
-                    (x (* radius (sin theta)))
-                    (z (* radius (cos theta)))
-                    (point (make-cube 2 2 2 :pos (float-vector x 0 z)))
-		    )
-	       (send point  :set-color :black)
-	       (send point :orient (- 0 (deg2rad current-angle)) :y)
+		    (x (* radius (sin theta)))
+		    (z (* radius (cos theta)))
+		    (point (make-cube 2 2 2 :pos (float-vector x 0 z)))
+		    ;; 接線ベクトル（円の接線なので、半径方向に垂直）
+		    (tangent-x (* radius (cos theta)))  ;; 接線のx成分
+		    (tangent-z (* -1 radius (sin theta)))  ;; 接線のz成分
+		    (tangent-angle (rad2deg (atan tangent-x tangent-z))))
+	       (send point :set-color :black)
+	       (send point :orient (deg2rad tangent-angle) :y)
                (push point points)
                (setq current-angle (+ current-angle angle-step))))
            (setq points (reverse points)))
