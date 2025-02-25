@@ -1,6 +1,6 @@
 #|
 Desctiption :
-Make a bend needle model here!
+Make a bend needle model.
 
 Author :
 @Michi-Tsubaki <michi.tsubaki.tech@gmail.com>
@@ -12,13 +12,14 @@ Author :
 (require "package://pr2eus/pr2-interface.l")
 (require "package://pr2eus/speak.l")
 
-; Define needle parameters
+#|
+;; Parameters (set in main.l)
 (setq *needle-radius* 35)      ; radius of curvature
 (setq *needle-thickness* 0.5)  ; thickness of the needle
 (setq *needle-angle* (/ pi 2)) ; angle of the arc
-
-;; Create points for the needle path
 (setq segments 40)
+|#
+
 (setq theta-step (/ *needle-angle* segments))
 (setq points nil)
 (dotimes (i (+ segments 1))
@@ -64,19 +65,19 @@ Author :
 (dolist (body (cdr needle-bodies))
   (send (car needle-bodies) :assoc body))
 
-;; 針の色（銀色）にする
+;; Set color
 (dolist (body needle-bodies)
   (send body :set-color :silver))
 
-;; needleをbodyset-linkとして定義する
+;; Define needle as bodyset-link
 (setq *needle* 
       (instance bodyset-link :init (make-cascoords)
                 :bodies needle-bodies))
 
-;; 表示する
+#|
+;; Display for debug
 (make-irtviewer)
 (objects (list *needle*))
-
-;; Optional: rotate the view to better see the needle
-(send *irtviewer* :viewing :look #f(0 -1 0.1))
+(send *irtviewer* :viewing :look #f(0 -1 0.1)) ;; angle
 (send *irtviewer* :draw-objects)
+|#
