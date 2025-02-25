@@ -4,6 +4,8 @@
 PR2で血管モデルを縫合する．
 20250219 血管の縫い方
 20250221 曲率を持った軌跡の作成 - 片方の針を血管内部に刺すことに成功
+20250224 持ち替え
+20250225 完成しているコードには英語でコメントを個人的TODOやissueには日本語でコメントを書く
 |#
 
 #| Review tips for building model in euslisp (@Michi-Tsubaki)
@@ -27,7 +29,7 @@ PR2で血管モデルを縫合する．
 (require "package://pr2eus/speak.l") ;; pkg for speaking
 
 ;; Import curved trajectory
-(load "trajectory.l")
+;;(load "trajectory.l")
 
 ;; Load jsk msg type
 (ros::load-ros-package "jsk_recognition_msgs")
@@ -70,13 +72,63 @@ PR2で血管モデルを縫合する．
 (setq *needle-thickness* 1)
 (setq *needle-angle* pi)
 (setq segments 40)
-(load "needle.l")
+;;(load "needle.l")
+(setq theta-step (/ *needle-angle* segments))
+(setq points nil)
+(dotimes (i (+ segments 1))
+  (let ((theta (* i theta-step)))
+    (push (float-vector 
+           (* *needle-radius* (- 1 (cos theta)))  ; x
+           0                                      ; y
+           (* *needle-radius* (sin theta)))       ; z
+          points)))
+(setq points (reverse points))
 
-;; Make a bend needle instance 
+;; Function to calculate rotation matrix from two points
+(defun make-rotation-matrix (p1 p2)
+  (let* ((diff (v- p2 p1))
+         (z-axis (normalize-vector diff))
+         (y-axis (float-vector 0 1 0))
+         (x-axis (v* y-axis z-axis)))
+    (setq y-axis (v* z-axis x-axis))  ; ensure orthogonality
+    (transpose (matrix (normalize-vector x-axis) 
+                      (normalize-vector y-axis) 
+                      (normalize-vector z-axis)))))
+
+;; Create cylinders along the arc
+(setq needle-parts nil)
+(let ((prev-point (car points)))
+  (dolist (point (cdr points))
+    (let* ((diff (v- point prev-point))
+           (height (norm diff))
+           (center (midpoint 0.5 prev-point point))
+           (cylinder (make-cylinder *needle-thickness* height :segments 12))
+           (rot-mat (make-rotation-matrix prev-point point)))
+      ;; Create coordinates at center with proper orientation
+      (setq coords (make-coords :pos center :rot rot-mat))
+      ;; Orient and position cylinder
+      (send cylinder :transform coords)
+      (push cylinder needle-parts)
+      (setq prev-point point))))
+
+;; Create the bodyset
+(setq needle-bodies (reverse needle-parts))
+
+;; Associate all parts with the first one
+(dolist (body (cdr needle-bodies))
+  (send (car needle-bodies) :assoc body))
+
+;; Set color
+(dolist (body needle-bodies)
+  (send body :set-color :yellow))
+
+;; Define needle as bodyset-link
 (setq *needle* 
       (instance bodyset-link :init (make-cascoords)
                 :bodies needle-bodies))
 
+;; Make a bend needle instance 
+(setq *needle* (instance bodyset-link :init (make-cascoords) :bodies needle-bodies))
 (send *needle* :translate (float-vector (- *centerx* 200) *centery* (+ *centerz* 40)))
 (send *needle* :rotate #d180 :y)
 (send *needle* :rotate #d90 :z)
@@ -109,11 +161,17 @@ PR2で血管モデルを縫合する．
 ;; Make left finger extension
 (setq *left-finger-extension* (make-cube *finger-length* *finger-width* *finger-thickness*))
 (send *left-finger-extension* :set-color :green) ;; Set color
-(setq *left-finger-coords* (send (send *pr2* :larm :end-coords) :copy-worldcoords))
+(setq *left-finger-coords* (send (send *pr2* :larm :end-coords) :copy-worldcoords)) ;; *left-finger-coords* is the TMP coords to set finger extension
 (send *left-finger-coords* :translate (float-vector (/ *finger-length* 2) 0 0))  ;; Offset
 (send *left-finger-coords* :rotate (deg2rad -90) :x)  ;; Offset(angle)
 (send *left-finger-extension* :move-to *left-finger-coords* :world)
 (send (send *pr2* :larm :end-coords) :assoc *left-finger-extension*)
+;; ** This is the coords which is used  representative coords! ** 
+(setq *left-finger-tip* (make-cascoords))
+(send *left-finger-tip* :transform (send *left-finger-extension* :copy-worldcoords))
+(send *left-finger-tip* :translate (float-vector (/ *finger-length* 2) 0 0))
+(send *left-finger-tip* :rotate #d90 :x)
+(send (send *pr2* :larm :end-coords) :assoc *left-finger-tip*)
 
 ;; Make right finger extension
 (setq *right-finger-extension* (make-cube *finger-length* *finger-width* *finger-thickness*))
@@ -123,15 +181,129 @@ PR2で血管モデルを縫合する．
 (send *right-finger-coords* :rotate (deg2rad -90) :x)  ;; Offset (angle)
 (send *right-finger-extension* :move-to *right-finger-coords* :world)
 (send (send *pr2* :rarm :end-coords) :assoc *right-finger-extension*)
+;; ** This is the coords which is used as right arm's representative coords!
+(setq *right-finger-tip* (make-cascoords))
+(send *right-finger-tip* :transform (send *right-finger-extension* :copy-worldcoords))
+(send *right-finger-tip* :translate (float-vector (/ *finger-length* 2) 0 0))
+(send (send *pr2* :rarm :end-coords) :assoc *right-finger-tip*)
 
 ;; Update objects list for draw
 (objects (list *pr2* *center* *desk* *table* *needle* *left-tube* *right-tube* *left-finger-extension* *right-finger-extension*))
 (send *irtviewer* :draw-objects)
 (ros::duration-sleep 1)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Trajectory Planning
+(defclass traj
+  :super cascaded-coords
+  :slots (points))
+
+(defmethod traj
+  (:init (&rest args)
+	 (send-super* :init args)
+	 (dotimes (i *traj_num*)
+	   (push
+	    (make-cube 10 10 10 :pos (float-vector (* (- i 5) *interval*) 0 0))
+	    points))
+	 (dotimes (i (- (length points) 1))
+	   (send (elt points i) :assoc (elt points (+ 1 i))))
+	 (send self :assoc (car points))
+	 self)
+  (:points () points)
+  )
+
+
+;; Define bend trajectories.
+(defclass curved-traj
+  :super cascaded-coords
+  :slots (points))
+(defmethod curved-traj
+  (:init (&key (radius 30.0) (start-angle -25) (end-angle 25)) ;; 初期値は適当..
+         (send-super :init)
+         (let* ((angle-step (/ (- end-angle start-angle) (1- *traj_num*)))
+                (current-angle start-angle))
+           ;; generate points
+           (setq points nil)  ;; initialize points
+           (dotimes (i *traj_num*)
+             (let* ((theta (deg2rad current-angle))
+		    (x (* radius (sin theta)))
+		    (z (* radius (cos theta)))
+		    (point (make-cube 2 2 2 :pos (float-vector x 0 z)))
+		    (tangent-x (* radius (cos theta)))
+		    (tangent-z (* -1 radius (sin theta)))
+		    (tangent-angle (rad2deg (atan tangent-x tangent-z))))
+	       (send point :set-color :black)
+	       (send point :orient (deg2rad tangent-angle) :y)
+               (push point points)
+               (setq current-angle (+ current-angle angle-step))))
+           (setq points (reverse points)))
+         ;; assoc
+         (dotimes (i (1- (length points)))
+           (send (elt points i) :assoc (elt points (1+ i))))
+         (send self :assoc (car points))
+         self)
+  (:points () points)
+  )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; main
+;; Main Function
+;; Define needle coords system
+(defun set-needle-tip ()
+  (setq *needle-tip* (make-cascoords 
+		      :pos (send (car (last needle-bodies)) :worldpos)))
+  (send *needle-tip* :rotate #d90 :y)
+  (send *needle-tip* :rotate #d180 :x)
+  (send *needle-tip* :rotate #d270 :z)
+  (send *needle* :assoc *needle-tip*) ;; Use needle-tip as the main coords of the needle. Do not edit it (Feb 25, Michi-Tsubaki)
+  )
 
+;; Define suture function
+(defun suture (trajectory time-interval)
+  (set-needle-tip)
+  (let (
+        (tm time-interval)
+        (path (list))
+        (time-vec (list 4000))
+        )
+    ;; ** assoc **
+    (send *left-finger-tip* :assoc *needle-tip*)    
+    ;; Solve inverse problem using needle-tip coords
+    (dolist (e (send trajectory :points))
+      (setq ee (send e :copy-worldcoords))
+      (send ee :translate (float-vector 0 0 0) :local)
+      (send ee :rotate #d270 :y :local)
+      (send ee :rotate #d90 :x :local)
+      (send ee :translate (float-vector 0 0 0))
+      (send ee :draw-on :flush t :size 100)
+      (push (print (send *pr2* :larm :inverse-kinematics ee 
+			 :move-target *needle-tip*
+			 :link-list (send *pr2* :link-list 
+					  (send *pr2* :larm :end-coords :parent))
+			 :use-torso t 
+			 :rotation-axis t)) 
+            path)
+      (push tm time-vec)
+      )
+    (pop time-vec)
+    (nreverse time-vec)
+    ;; (nreverse path) ;; しなくていいみたいだけど，なんで？ゼミのときはした．
+    (dolist (i path)
+      (send *pr2* :angle-vector i)
+      (send *irtviewer* :draw-objects)
+      (unix:usleep 100000))
+    (send *ri* :angle-vector-sequence path time-vec
+          :default-controller 0.001
+          :min-time 0.0001
+          :minjerk-interpolation t)
+    (send *ri* :wait-interpolation)    
+    ;; Dissoc needle-tip coords ;; Do not forget!
+    (send *left-finger-tip* :dissoc *needle-tip*)
+    (send *pr2* :angle-vector (car (last path)))
+    (send *irtviewer* :draw-objects)
+    ) ;; let
+  ) ;; defun
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Main
 ;; Set init pose
 (setq *voice-mode* nil)
 (if *voice-mode* (send *ri* :speak-jp "初期姿勢に戻ります" :wait t))
@@ -143,8 +315,7 @@ PR2で血管モデルを縫合する．
 (send *irtviewer* :draw-objects)
 (ros::duration-sleep 1)
 
-;; Grab needle in left hand
-;; irtviewer上で針をロボットのところに移動している
+;; Grab needle in left hand in the viewer
 (setq *larm-coords* (send *pr2* :larm :end-coords :copy-worldcoords))
 (send *larm-coords* :rotate #d180 :y)
 (send *larm-coords* :rotate #d180 :z)
@@ -155,14 +326,17 @@ PR2で血管モデルを縫合する．
 
 ;; Robot actually grab needle by human support
 (if *voice-mode* (send *ri* :speak-jp "針を持たせてください" :wait t))
+(send *ri* :stop-grasp :rarm)
 (send *ri* :stop-grasp :larm)
 (send *ri* :wait-interpolation)
 (ros::duration-sleep 2)
+(if *voice-mode* (send *ri* :speak-jp "閉じます．注意して下さい．" :wait t))
 (send *ri* :start-grasp :larm)
 (send *ri* :wait-interpolation)
+(ros::duration-sleep 1)
 ;; TODO: FVが実装されたらここで正しく持てているかを確認して必要に応じて繰り返す.
 ;; lerobotのはじめの例みたいな感じで逆側のアームでつついて正しい姿勢にするみたいな？
-;; パターンマッチング
+;; パターンマッチングとかしてみたい
 (send *irtviewer* :draw-objects)
 
 ;; Suturing
@@ -184,8 +358,9 @@ PR2で血管モデルを縫合する．
 (setq *traj_len* (* *interval* *traj_num*))
 (setq *curved-path* (instance curved-traj :init))
 (send *curved-path* :translate (send *left-tube-rc* :worldpos))
-;; TODO: translateする先の位置(*left-tube-rc*)をDepth cameraで取得したい(Vision)
-(send *curved-path* :translate #f(0 0 33))
+;; TODO: translateする先の位置(*left-tube-rc*)をDepth cameraで取得したい (Visionタスク)
+;;        エイプリルタグ + d435とか
+(send *curved-path* :translate #f(0 0 32))
 (send *curved-path* :rotate #d90 :z)
 (send *curved-path* :rotate #d180 :x)
 (send *irtviewer* :draw-objects)
@@ -194,82 +369,78 @@ PR2で血管モデルを縫合する．
 (objects (append (list *pr2* *center* *desk* *table* *needle* *left-tube* *right-tube* *left-finger-extension* *right-finger-extension*) (send *curved-path* :points)))
 (send *irtviewer* :draw-objects)
 
-
-;; 左手手先座標系の作成
-(setq *left-finger-tip* (make-cascoords))
-(send *left-finger-tip* :transform (send *left-finger-extension* :copy-worldcoords))
-(send *left-finger-tip* :translate (float-vector (/ *finger-length* 2) 0 0))
-(send *left-finger-tip* :rotate #d90 :x)
-(send (send *pr2* :larm :end-coords) :assoc *left-finger-tip*)
-
-;; 針先座標系の設定
-(setq *needle-tip* (make-cascoords 
-                    :pos (send (car (last needle-bodies)) :worldpos)))
-(send *needle-tip* :rotate #d90 :y)
-(send *needle-tip* :rotate #d180 :x)
-(send *needle-tip* :rotate #d270 :z)
-;; 針本体に針先座標系をassoc
-(send *needle* :assoc *needle-tip*)
-
-
-;; 縫合実行関数
-
-;; 縫合実行関数
-(defun suture (trajectory time-interval)
-  (let (
-        (tm time-interval)
-        (path (list))
-        (time-vec (list 4000))
-        )
-    ;; 針先の座標系をleft-finger-tipにassoc
-    (send *left-finger-tip* :assoc *needle-tip*)
-    
-    ;; 軌道に沿ってIKを解く
-    (dolist (e (send trajectory :points))
-      (setq ee (send e :copy-worldcoords))
-      (send ee :translate (float-vector 0 0 0) :local)
-      (send ee :rotate #d270 :y :local)
-      (send ee :rotate #d90 :x :local)
-      (send ee :translate (float-vector 0 0 0))
-      (send ee :draw-on :flush t :size 100)
-      
-      ;; IKを解く（針先をターゲットとして指定）
-      (push (print (send *pr2* :larm :inverse-kinematics ee 
-			 :move-target *needle-tip*  ;; 針先を移動対象に
-			 :link-list (send *pr2* :link-list 
-					  (send *pr2* :larm :end-coords :parent))
-			 :use-torso t 
-			 :rotation-axis t)) 
-            path)
-      (push tm time-vec)
-      )
-
-    ;; 経路を実行
-    (pop time-vec)
-    (nreverse time-vec)
-    ;;(nreverse path)
-
-    (dolist (i path)
-      (send *pr2* :angle-vector i)
-      (send *irtviewer* :draw-objects)
-      (unix:usleep 100000))
-
-
-    (send *ri* :angle-vector-sequence path time-vec
-          :default-controller 0.001
-          :min-time 0.0001
-          :minjerk-interpolation t)
-    (send *ri* :wait-interpolation)
-    
-    ;; 針先のassocを解除
-    (send *left-finger-tip* :dissoc *needle-tip*)
-    (send *pr2* :angle-vector (car (last path)))
-    (send *irtviewer* :draw-objects)
-    ) ;; let
-  ) ;; defun
-
+;; Suture!
+(ros::duration-sleep 1)
 (suture *curved-path* 4000)
+(ros::duration-sleep 1)
 
-;; TODO: 引き出し (vision, 触覚)
+;; TODO: 右手で掴みに行く (now in construction)
+;; ikで :use-torso nil にしてもtorsoが動いてしまうので，torsoを保存することにする
+;; Rarm goes to wait position
+(setq *larm-angles* (send *pr2* :larm :angle-vector))
+(setq *torso-angle* (send *pr2* :torso :angle-vector))
+(setq *pre-grasp-coords* (send *needle-tip* :copy-worldcoords))
+(send *pre-grasp-coords* :translate #f(-50 10 0))
+(send *pr2* :rarm :inverse-kinematics *pre-grasp-coords* 
+      :move-target *right-finger-tip*
+      :link-list (send *pr2* :link-list (send *pr2* :rarm :end-coords :parent))
+      :rotation-axis t)
+(send *pr2* :larm :angle-vector *larm-angles*) ;; Recover torso angle
+(send *pr2* :torso :angle-vector *torso-angle*)
+(send *ri* :angle-vector (send *pr2* :angle-vector) 6000)
+(send *ri* :wait-interpolation)
+(send *irtviewer* :draw-objects)
+(ros::duration-sleep 1)
 
-;; TODO: 持ち替え
+#| Issue これだとuse-torsoをnilにしても腰が動いてしまうなぜか
+(send (send *pr2* :larm :end-coords) :dissoc *needle*)
+(setq *pre-grasp-coords* (send *needle-tip* :copy-worldcoords))
+(send *pre-grasp-coords* :translate #f(0 -50 0)) ;; 針先から少し離れた位置に
+(send *pr2* :rarm :inverse-kinematics *pre-grasp-coords* 
+      :move-target *right-finger-tip*
+      :link-list (send *pr2* :link-list (send *pr2* :rarm :end-coords :parent))
+      :use-torso nil
+      :rotation-axis t)
+(send *ri* :angle-vector (send *pr2* :angle-vector) 5000)
+(send *ri* :wait-interpolation)
+(send *irtviewer* :draw-objects)
+|#
+
+;; Approaching
+(setq *grasp-coords* (send *needle-tip* :copy-worldcoords))
+(send *grasp-coords* :translate #f(5 0 0))
+(send *pr2* :rarm :inverse-kinematics *grasp-coords*
+      :move-target *right-finger-tip*
+      :link-list (send *pr2* :link-list (send *pr2* :rarm :end-coords :parent))
+      :rotation-axis t)
+(send *ri* :angle-vector (send *pr2* :angle-vector) 5000)
+(send *ri* :wait-interpolation)
+(send *irtviewer* :draw-objects)
+(ros::duration-sleep 1)
+
+;; Exchange needle L2R
+(send *ri* :stop-grasp :larm)
+(send (send *pr2* :larm :end-coords) :dissoc *needle*)
+(send *ri* :start-grasp :rarm)
+(send (send *pr2* :rarm :end-coords) :assoc *needle*)
+(send *ri* :wait-interpolation)
+(ros::duration-sleep 1)
+
+
+;; Larm moves a little distance
+(send *pr2* :larm :move-end-pos #f(0 0 30) :world)
+(send *ri* :angle-vector (send *pr2* :angle-vector) 1000)
+(send *ri* :wait-interpolation)
+(send *irtviewer* :draw-objects)
+(ros::duration-sleep 1)
+
+;; Draw a needle from tube
+(setq *post-grasp-coords* (send *grasp-coords* :copy-worldcoords))
+(send *post-grasp-coords* :translate #f(-10 0 0))
+(send *pr2* :rarm :inverse-kinematics *post-grasp-coords*
+      :move-target *right-finger-tip*
+      :link-list (send *pr2* :link-list (send *pr2* :rarm :end-coords :parent))
+      :rotation-axis t)
+(send *ri* :angle-vector (send *pr2* :angle-vector) 10000)
+(send *ri* :wait-interpolation)
+(send *irtviewer* :draw-objects)
