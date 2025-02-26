@@ -11,3 +11,7 @@
   - `curved_traj`曲率を持った軌跡 (引数: 入り角, 出角, 半径, 位置)
 - 縫合する関数 (for 曲率を持った軌跡)
   - `suture` angle-vector-sequence によって縫合．針の先端がターゲットのtrajectoryを縫う．（関数内部で針の先端の座標系をassoc, dissocしたりしている．）
+
+## eusでのシミュレーション
+2月25日現在
+https://github.com/user-attachments/assets/d5409fd7-fd25-4de7-9d43-941d721092f9
