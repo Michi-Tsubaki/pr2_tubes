@@ -211,13 +211,12 @@ PR2で血管モデルを縫合する．
   (:points () points)
   )
 
-
 ;; Define bend trajectories.
 (defclass curved-traj
   :super cascaded-coords
   :slots (points))
 (defmethod curved-traj
-  (:init (&key (radius 30.0) (start-angle -10) (end-angle 10)) ;; 初期値は適当..
+  (:init (&key (radius 30.0) (start-angle -22) (end-angle 15)) ;; 初期値適当..
          (send-super :init)
          (let* ((angle-step (/ (- end-angle start-angle) (1- *traj_num*)))
                 (current-angle start-angle))
@@ -285,16 +284,12 @@ PR2で血管モデルを縫合する．
       )
     (pop time-vec)
     (nreverse time-vec)
-    ;; (nreverse path) ;; しなくていいみたいだけど，なんで？ゼミのときはした．
+    ;; (nreverse path)
     (dolist (i path)
       (send *pr2* :angle-vector i)
       (send *irtviewer* :draw-objects)
       (unix:usleep 100000))
     (send *ri* :angle-vector-sequence path time-vec)
-          ;;  :default-controller 0.001
-          ;; :min-time 0.0001
-          ;; :minjerk-interpolation t)
-
     (send *ri* :wait-interpolation)    
     ;; Dissoc needle-tip coords ;; Do not forget!
     (send *left-finger-tip* :dissoc *needle-tip*)
@@ -327,8 +322,6 @@ PR2で血管モデルを縫合する．
 
 ;; Robot actually grab needle by human support
 (if *voice-mode* (send *ri* :speak-jp "針を持たせてください" :wait t))
-(send *ri* :stop-grasp :rarm)
-(send *ri* :stop-grasp :larm)
 (send *ri* :wait-interpolation)
 (ros::duration-sleep 2)
 (if *voice-mode* (send *ri* :speak-jp "閉じます．注意して下さい．" :wait t))
@@ -402,7 +395,7 @@ PR2で血管モデルを縫合する．
 
 ;; Approaching
 (setq *grasp-coords* (send *needle-tip* :copy-worldcoords))
-(send *grasp-coords* :translate #f(0 22 0))
+(send *grasp-coords* :translate #f(-15 22 10))
 (send *pr2* :rarm :inverse-kinematics *grasp-coords*
       :move-target *right-finger-tip*
       :link-list (send *pr2* :link-list (send *pr2* :rarm :end-coords :parent))
@@ -423,7 +416,6 @@ PR2で血管モデルを縫合する．
 (send *ri* :wait-interpolation)
 (ros::duration-sleep 1)
 
-
 ;; Larm moves a little distance
 (send *pr2* :larm :move-end-pos #f(0 0 30) :world)
 (send *ri* :angle-vector (send *pr2* :angle-vector) 1000)
@@ -433,7 +425,7 @@ PR2で血管モデルを縫合する．
 
 ;; Draw a needle from tube
 (setq *post-grasp-coords* (send *grasp-coords* :copy-worldcoords))
-(send *post-grasp-coords* :translate #f(-10 0 0))
+(send *post-grasp-coords* :translate #f(-15 -5 0))
 (send *pr2* :rarm :inverse-kinematics *post-grasp-coords*
       :move-target *right-finger-tip*
       :link-list (send *pr2* :link-list (send *pr2* :rarm :end-coords :parent))
