@@ -45,7 +45,7 @@ PR2で血管モデルを縫合する．
 ;; "Center position of experiment desk"
 (setq *centerx* 700)
 (setq *centery* 0)
-(setq *centerz* 723)
+(setq *centerz* 713)
 (setq *center* (make-cube 10 10 10))
 (send *center* :translate (float-vector *centerx* *centery* *centerz*))
 (send *center* :set-color :black)
@@ -367,6 +367,8 @@ PR2で血管モデルを縫合する．
 (ros::duration-sleep 1)
 (suture *curved-path* 3000)
 (ros::duration-sleep 1)
+(send *pr2* :larm :move-end-pos #f(0 10 0) :world)
+
 
 (send *pr2* :larm :move-end-pos #f(0 0 10) :world)
 (send *ri* :angle-vector (send *pr2* :angle-vector) 1000)
@@ -374,20 +376,19 @@ PR2で血管モデルを縫合する．
 (send *irtviewer* :draw-objects)
 (ros::duration-sleep 1)
 
-
 ;; TODO: 右手で掴みに行く (now in construction)
 ;; ikで :use-torso nil にしてもtorsoが動いてしまうので，torsoを保存することにする
 ;; Rarm goes to wait position
-(setq *larm-angles* (send *pr2* :larm :angle-vector))
-(setq *torso-angle* (send *pr2* :torso :angle-vector))
+;;(setq *larm-angles* (send *pr2* :larm :angle-vector))
+;;(setq *torso-angle* (send *pr2* :torso :angle-vector))
 (setq *pre-grasp-coords* (send *needle-tip* :copy-worldcoords))
 (send *pre-grasp-coords* :translate #f(-50 10 0))
 (send *pr2* :rarm :inverse-kinematics *pre-grasp-coords* 
       :move-target *right-finger-tip*
-      :link-list (send *pr2* :link-list (send *pr2* :rarm :end-coords :parent))
+      :link-list (send *pr2* :link-list (send *pr2* :rarm :end-coords :parent) (send *pr2* :rarm :root-link));;(send *pr2* :link-list (send *pr2* :rarm :end-coords :parent))
       :rotation-axis t)
-(send *pr2* :larm :angle-vector *larm-angles*) ;; Recover torso angle
-(send *pr2* :torso :angle-vector *torso-angle*)
+;;(send *pr2* :larm :angle-vector *larm-angles*) ;; Recover torso angle
+;;(send *pr2* :torso :angle-vector *torso-angle*)
 (send *ri* :angle-vector (send *pr2* :angle-vector) 6000)
 (send *ri* :wait-interpolation)
 (send *irtviewer* :draw-objects)
@@ -395,7 +396,11 @@ PR2で血管モデルを縫合する．
 
 ;; Approaching
 (setq *grasp-coords* (send *needle-tip* :copy-worldcoords))
-(send *grasp-coords* :translate #f(-15 22 10))
+;; **ここのオフセットを毎回実験するときに変更する
+(setq x_error -15) ;; 前後ろ
+(setq y_error 12) ;; 上下の誤差
+(setq z_error 10) ;; 左右の誤差
+(send *grasp-coords* :translate (float-vector x_error y_error z_error))
 (send *pr2* :rarm :inverse-kinematics *grasp-coords*
       :move-target *right-finger-tip*
       :link-list (send *pr2* :link-list (send *pr2* :rarm :end-coords :parent))
