@@ -44,23 +44,26 @@
     <param name="debug_view" value="true" />
   </node> -->
 
-
-  <!-- 輪郭検出ノード -->
-  <node name="find_contours" pkg="opencv_apps" type="find_contours">
-    <remap from="image" to="/edge_detection/image" />
-    <param name="debug_view" value="true" />
-  </node>
-
   <!-- エッジからマスク画像を生成 -->
-  <node name="edge_to_mask" pkg="pr2_tubes" type="edge2mask.py" output="screen">
-    <remap from="~input" to="/edge_detection/image" />
+  <node name="edge2mask" pkg="pr2_tubes" type="edge2mask.py" output="screen">
+    <remap from="~input" to="/tube_edge_detection/image" />
+    <remap from="~depth_mask" to="/depth_image_filter/output/mask" />
+    <param name="min_area_ratio" value="0.00000005" />  <!-- 小さいオブジェクト用に小さな値 -->
+    <param name="max_area_ratio" value="0.005" />     <!-- 大きすぎるオブジェクトを除外 -->
+    <param name="apply_to_depth" value="true" />
+    <param name="debug" value="true" />
   </node>
 
-  <!-- マスクと深度フィルターを組み合わせる -->
+  <!-- Add this to visualize the debug output -->
+  <node name="view_filled_contours" pkg="image_view" type="image_view">
+    <remap from="image" to="/edge2mask/debug/filled_contours" />
+  </node>
+
+  <!-- マスクと深度フィルターを組み合わせる 
   <node name="apply_mask_to_depth" pkg="nodelet" type="nodelet" args="standalone jsk_pcl/MaskImage">
     <remap from="~input" to="/depth_image_filter/output/mask" />
     <remap from="~mask" to="/edge_to_mask/output/mask" />
     <param name="approximate_sync" value="true" />
-  </node>
+  </node>-->
 
 </launch>
