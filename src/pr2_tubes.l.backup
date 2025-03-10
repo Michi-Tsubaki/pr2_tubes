@@ -49,7 +49,7 @@ PR2で血管モデルを縫合する．
 ;; "Center position of experiment desk"
 (setq *centerx* 700)
 (setq *centery* 0)
-(setq *centerz* 719) ;; 750 713 上げると下がる．
+(setq *centerz* 725) ;; 750 713 上げると下がる．
 (setq *center* (make-cube 10 10 10))
 (send *center* :translate (float-vector *centerx* *centery* *centerz*))
 (send *center* :set-color :black)
@@ -220,7 +220,7 @@ PR2で血管モデルを縫合する．
   :super cascaded-coords
   :slots (points))
 (defmethod curved-traj
-  (:init (&key (radius 50.0) (start-angle -10) (end-angle 10)) ;; 初期値適当..
+  (:init (&key (radius 30.0) (start-angle -22) (end-angle 15)) ;; 初期値適当..
          (send-super :init)
          (let* ((angle-step (/ (- end-angle start-angle) (1- *traj_num*)))
                 (current-angle start-angle))
@@ -319,7 +319,6 @@ PR2で血管モデルを縫合する．
 (setq *larm-coords* (send *pr2* :larm :end-coords :copy-worldcoords))
 (send *larm-coords* :rotate #d180 :y)
 (send *larm-coords* :rotate #d180 :z)
-(send *larm-coords* :rotate #d180 :x)
 (send *larm-coords* :translate (float-vector (- *finger-offset* 12) 0 -8))
 (send *needle* :move-to *larm-coords* :world)
 (send (send *pr2* :larm :end-coords) :assoc *needle*)
@@ -344,7 +343,7 @@ PR2で血管モデルを縫合する．
 (send *target-coords* :rotate #d90 :x) 
 (send *target-coords* :rotate #d90 :z)
 (send *target-coords* :rotate #d270 :y)
-;;(send *target-coords* :rotate #d180 :x)
+(send *target-coords* :rotate #d180 :x)
 (send *target-coords* :translate #f(-80 0 0))
 (send *pr2* :larm :inverse-kinematics *target-coords* :rotation-axis t)
 (send *ri* :angle-vector (send *pr2* :angle-vector) 5000)
@@ -352,14 +351,14 @@ PR2で血管モデルを縫合する．
 (send *irtviewer* :draw-objects)
 
 ;; Make trajectories
-(setq *interval* 0.1)
-(setq *traj_num* 5)
+(setq *interval* 0.3)
+(setq *traj_num* 8)
 (setq *traj_len* (* *interval* *traj_num*))
 (setq *curved-path* (instance curved-traj :init))
 (send *curved-path* :translate (send *left-tube-rc* :worldpos))
 ;; TODO: translateする先の位置(*left-tube-rc*)をDepth cameraで取得したい (Visionタスク)
 ;;        エイプリルタグ + d405とか
-(send *curved-path* :translate #f(0 0 55))
+(send *curved-path* :translate #f(0 0 32))
 (send *curved-path* :rotate #d90 :z)
 (send *curved-path* :rotate #d180 :x)
 (send *irtviewer* :draw-objects)
@@ -405,7 +404,7 @@ PR2で血管モデルを縫合する．
 ;; 針くん目線で
 (setq x_error -5) ;; 前(+)後ろ(-)
 (setq y_error 12) ;; 上下の誤差
-(setq z_error 17) ;; 左右の誤差
+(setq z_error 10) ;; 左右の誤差
 (send *grasp-coords* :translate (float-vector x_error y_error z_error))
 (send *pr2* :rarm :inverse-kinematics *grasp-coords*
       :move-target *right-finger-tip*
